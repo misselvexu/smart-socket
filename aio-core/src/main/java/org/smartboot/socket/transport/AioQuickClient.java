@@ -11,6 +11,7 @@ package org.smartboot.socket.transport;
 
 import org.smartboot.socket.MessageProcessor;
 import org.smartboot.socket.Protocol;
+import org.smartboot.socket.buffer.BufferPagePool;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -50,13 +51,14 @@ public class AioQuickClient<T> {
      * 客户端服务配置。
      * <p>调用AioQuickClient的各setXX()方法，都是为了设置config的各配置项</p>
      */
-    protected IoServerConfig<T> config = new IoServerConfig<>(false);
+    protected IoServerConfig<T> config = new IoServerConfig<>();
     /**
      * 网络连接的会话对象
      *
      * @see AioSession
      */
     protected AioSession<T> session;
+    protected BufferPagePool bufferPool = null;
     /**
      * IO事件处理线程组。
      * <p>
@@ -99,6 +101,9 @@ public class AioQuickClient<T> {
      */
     public AioSession<T> start(AsynchronousChannelGroup asynchronousChannelGroup) throws IOException, ExecutionException, InterruptedException {
         AsynchronousSocketChannel socketChannel = AsynchronousSocketChannel.open(asynchronousChannelGroup);
+        if (bufferPool == null) {
+            bufferPool = new BufferPagePool(IoServerConfig.getIntProperty(IoServerConfig.Property.CLIENT_PAGE_SIZE, 1024 * 256), 1, IoServerConfig.getBoolProperty(IoServerConfig.Property.CLIENT_PAGE_IS_DIRECT, true));
+        }
         //set socket options
         if (config.getSocketOptions() != null) {
             for (Map.Entry<SocketOption<Object>, Object> entry : config.getSocketOptions().entrySet()) {
@@ -111,7 +116,7 @@ public class AioQuickClient<T> {
         }
         socketChannel.connect(new InetSocketAddress(config.getHost(), config.getPort())).get();
         //连接成功则构造AIOSession对象
-        session = new AioSession<T>(socketChannel, config, new ReadCompletionHandler<T>(), new WriteCompletionHandler<T>(), false);
+        session = new AioSession<T>(socketChannel, config, new ReadCompletionHandler<T>(), new WriteCompletionHandler<T>(), bufferPool.allocateBufferPage());
         session.initSession();
         return session;
     }
@@ -142,8 +147,19 @@ public class AioQuickClient<T> {
      * </p>
      */
     public final void shutdown() {
+        showdown0(false);
+    }
+
+    /**
+     * 立即关闭客户端
+     */
+    public final void shutdownNow() {
+        showdown0(true);
+    }
+
+    private void showdown0(boolean flag) {
         if (session != null) {
-            session.close();
+            session.close(flag);
             session = null;
         }
         //仅Client内部创建的ChannelGroup需要shutdown
@@ -152,7 +168,6 @@ public class AioQuickClient<T> {
         }
     }
 
-
     /**
      * 设置读缓存区大小
      *
@@ -160,16 +175,6 @@ public class AioQuickClient<T> {
      */
     public final AioQuickClient<T> setReadBufferSize(int size) {
         this.config.setReadBufferSize(size);
-        return this;
-    }
-
-    /**
-     * 设置输出队列缓冲区长度。输出缓冲区的内存大小取决于size个ByteBuffer的大小总和。
-     *
-     * @param size 缓冲区数组长度
-     */
-    public final AioQuickClient<T> setWriteQueueSize(int size) {
-        this.config.setWriteQueueSize(size);
         return this;
     }
 
@@ -202,6 +207,22 @@ public class AioQuickClient<T> {
      */
     public final AioQuickClient<T> bindLocal(String local, int port) {
         localAddress = local == null ? new InetSocketAddress(port) : new InetSocketAddress(local, port);
+        return this;
+    }
+
+    public final AioQuickClient<T> setBufferPagePool(BufferPagePool bufferPool) {
+        this.bufferPool = bufferPool;
+        return this;
+    }
+
+    /**
+     * 设置write缓冲区容量
+     *
+     * @param writeQueueCapacity
+     * @return
+     */
+    public final AioQuickClient<T> setWriteQueueCapacity(int writeQueueCapacity) {
+        config.setWriteQueueCapacity(writeQueueCapacity);
         return this;
     }
 }

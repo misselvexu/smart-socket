@@ -14,6 +14,7 @@ import org.smartboot.socket.MessageProcessor;
 import org.smartboot.socket.NetMonitor;
 import org.smartboot.socket.Protocol;
 import org.smartboot.socket.StateMachineEnum;
+import org.smartboot.socket.buffer.BufferPagePool;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -23,6 +24,8 @@ import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.CompletionHandler;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
@@ -50,19 +53,21 @@ public class AioQuickServer<T> {
      * Server端服务配置。
      * <p>调用AioQuickServer的各setXX()方法，都是为了设置config的各配置项</p>
      */
-    protected IoServerConfig<T> config = new IoServerConfig<>(true);
+    protected IoServerConfig<T> config = new IoServerConfig<>();
+    protected BufferPagePool bufferPool;
     /**
      * 读回调事件处理
      */
-    protected ReadCompletionHandler<T> aioReadCompletionHandler = new ReadCompletionHandler<>();
+    protected ReadCompletionHandler<T> aioReadCompletionHandler;
     /**
      * 写回调事件处理
      */
-    protected WriteCompletionHandler<T> aioWriteCompletionHandler = new WriteCompletionHandler<>();
+    protected WriteCompletionHandler<T> aioWriteCompletionHandler;
+    private ExecutorService readExecutorService;
     private Function<AsynchronousSocketChannel, AioSession<T>> aioSessionFunction;
-
     private AsynchronousServerSocketChannel serverSocketChannel = null;
     private AsynchronousChannelGroup asynchronousChannelGroup;
+
 
     /**
      * 设置服务端启动必要参数配置
@@ -100,7 +105,7 @@ public class AioQuickServer<T> {
         start0(new Function<AsynchronousSocketChannel, AioSession<T>>() {
             @Override
             public AioSession<T> apply(AsynchronousSocketChannel channel) {
-                return new AioSession<T>(channel, config, aioReadCompletionHandler, aioWriteCompletionHandler, true);
+                return new AioSession<T>(channel, config, aioReadCompletionHandler, aioWriteCompletionHandler, bufferPool.allocateBufferPage());
             }
         });
     }
@@ -112,13 +117,25 @@ public class AioQuickServer<T> {
      */
     protected final void start0(Function<AsynchronousSocketChannel, AioSession<T>> aioSessionFunction) throws IOException {
         try {
-            this.aioSessionFunction = aioSessionFunction;
-            asynchronousChannelGroup = AsynchronousChannelGroup.withFixedThreadPool(config.getThreadNum(), new ThreadFactory() {
+            readExecutorService = Executors.newFixedThreadPool(config.getThreadNum(), new ThreadFactory() {
                 byte index = 0;
 
                 @Override
                 public Thread newThread(Runnable r) {
-                    return new Thread(r, "smart-socket:AIO-" + (++index));
+                    return new Thread(r, "smart-socket:WorkerThread-" + (++index));
+                }
+            });
+            aioReadCompletionHandler = new ReadCompletionHandler<>(readExecutorService);
+            aioWriteCompletionHandler = new WriteCompletionHandler<>();
+
+            this.bufferPool = new BufferPagePool(IoServerConfig.getIntProperty(IoServerConfig.Property.SERVER_PAGE_SIZE, 1024 * 1024), IoServerConfig.getIntProperty(IoServerConfig.Property.BUFFER_PAGE_NUM, config.getThreadNum()), IoServerConfig.getBoolProperty(IoServerConfig.Property.SERVER_PAGE_IS_DIRECT, true));
+            this.aioSessionFunction = aioSessionFunction;
+            asynchronousChannelGroup = AsynchronousChannelGroup.withFixedThreadPool(Runtime.getRuntime().availableProcessors(), new ThreadFactory() {
+                byte index = 0;
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, "smart-socket:BossThread-" + (++index));
                 }
             });
             this.serverSocketChannel = AsynchronousServerSocketChannel.open(asynchronousChannelGroup);
@@ -136,16 +153,23 @@ public class AioQuickServer<T> {
             }
 
             serverSocketChannel.accept(serverSocketChannel, new CompletionHandler<AsynchronousSocketChannel, AsynchronousServerSocketChannel>() {
+                NetMonitor<T> monitor = config.getMonitor();
+
                 @Override
-                public void completed(final AsynchronousSocketChannel channel, AsynchronousServerSocketChannel serverSocketChannel) {
+                public void completed(final AsynchronousSocketChannel channel, final AsynchronousServerSocketChannel serverSocketChannel) {
                     serverSocketChannel.accept(serverSocketChannel, this);
-                    NetMonitor<T> monitor = config.getMonitor();
-                    if (monitor == null || monitor.acceptMonitor(channel)) {
-                        createSession(channel);
-                    } else {
-                        config.getProcessor().stateEvent(null, StateMachineEnum.REJECT_ACCEPT, null);
-                        closeChannel(channel);
-                    }
+                    readExecutorService.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (monitor == null || monitor.acceptMonitor(channel)) {
+                                createSession(channel);
+                            } else {
+                                config.getProcessor().stateEvent(null, StateMachineEnum.REJECT_ACCEPT, null);
+                                LOGGER.warn("reject accept channel:{}", channel);
+                                closeChannel(channel);
+                            }
+                        }
+                    });
                 }
 
                 @Override
@@ -173,7 +197,7 @@ public class AioQuickServer<T> {
             session = aioSessionFunction.apply(channel);
             session.initSession();
         } catch (Exception e1) {
-            LOGGER.debug(e1.getMessage(), e1);
+            LOGGER.error(e1.getMessage(), e1);
             if (session == null) {
                 closeChannel(channel);
             } else {
@@ -239,16 +263,6 @@ public class AioQuickServer<T> {
 
 
     /**
-     * 设置输出队列缓冲区长度
-     *
-     * @param size 缓存队列长度
-     */
-    public final AioQuickServer<T> setWriteQueueSize(int size) {
-        this.config.setWriteQueueSize(size);
-        return this;
-    }
-
-    /**
      * 设置读缓存区大小
      *
      * @param size 单位：byte
@@ -282,6 +296,17 @@ public class AioQuickServer<T> {
      */
     public final <V> AioQuickServer<T> setOption(SocketOption<V> socketOption, V value) {
         config.setOption(socketOption, value);
+        return this;
+    }
+
+    /**
+     * 设置write缓冲区容量
+     *
+     * @param writeQueueCapacity
+     * @return
+     */
+    public final AioQuickServer<T> setWriteQueueCapacity(int writeQueueCapacity) {
+        config.setWriteQueueCapacity(writeQueueCapacity);
         return this;
     }
 }

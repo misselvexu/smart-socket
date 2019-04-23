@@ -32,16 +32,25 @@ final class IoServerConfig<T> {
             "\\__, \\| ( ) ( ) |( (_| || |   | |_    \\__, \\( (_) )( (___ | |\\`\\ (  ___/| |_ \n" +
             "(____/(_) (_) (_)`\\__,_)(_)   `\\__)   (____/`\\___/'`\\____)(_) (_)`\\____)`\\__)";
 
-    public static final String VERSION = "v1.3.25";
-    private final boolean server;
+    public static final String VERSION = "v1.4.0";
     /**
-     * 消息队列缓存大小
+     * 释放流控阈值
      */
-    private int writeQueueSize = 0;
+//    private final int releaseFlowControlSize = getIntProperty(Property.SERVER_RELEASE_FLOW_CONTROL_SIZE, 10);
+
+    /**
+     * 流控阈值
+     */
+//    private final int flowControlSize = getIntProperty(Property.SERVER_FLOW_CONTROL_SIZE, 20);
     /**
      * 消息体缓存大小,字节
      */
     private int readBufferSize = 512;
+
+    /**
+     * Write缓存区容量
+     */
+    private int writeQueueCapacity = 512;
     /**
      * 远程服务器IP
      */
@@ -66,27 +75,33 @@ final class IoServerConfig<T> {
      * 服务器处理线程数
      */
     private int threadNum = Runtime.getRuntime().availableProcessors() + 1;
-    private float limitRate = 0.9f;
-    private float releaseRate = 0.6f;
-    /**
-     * 流控指标线
-     */
-    private int flowLimitLine = (int) (writeQueueSize * limitRate);
-    /**
-     * 释放流控指标线
-     */
-    private int releaseLine = (int) (writeQueueSize * releaseRate);
     /**
      * 是否启用控制台banner
      */
     private boolean bannerEnabled = true;
+
     /**
      * Socket 配置
      */
     private Map<SocketOption<Object>, Object> socketOptions;
 
-    public IoServerConfig(boolean server) {
-        this.server = server;
+    static int getIntProperty(String property, int defaultVal) {
+        String valString = System.getProperty(property);
+        if (valString != null) {
+            try {
+                return Integer.parseInt(valString);
+            } catch (NumberFormatException e) {
+            }
+        }
+        return defaultVal;
+    }
+
+    static boolean getBoolProperty(String property, boolean defaultVal) {
+        String valString = System.getProperty(property);
+        if (valString != null) {
+            return Boolean.parseBoolean(valString);
+        }
+        return defaultVal;
     }
 
     public final String getHost() {
@@ -113,11 +128,9 @@ final class IoServerConfig<T> {
         this.threadNum = threadNum;
     }
 
-
     public NetMonitor<T> getMonitor() {
         return monitor;
     }
-
 
     public Protocol<T> getProtocol() {
         return protocol;
@@ -133,19 +146,7 @@ final class IoServerConfig<T> {
 
     public final void setProcessor(MessageProcessor<T> processor) {
         this.processor = processor;
-        if (processor instanceof NetMonitor) {
-            this.monitor = (NetMonitor<T>) processor;
-        }
-    }
-
-    public int getWriteQueueSize() {
-        return writeQueueSize;
-    }
-
-    public void setWriteQueueSize(int writeQueueSize) {
-        this.writeQueueSize = writeQueueSize;
-        flowLimitLine = (int) (writeQueueSize * limitRate);
-        releaseLine = (int) (writeQueueSize * releaseRate);
+        this.monitor = (processor instanceof NetMonitor) ? (NetMonitor<T>) processor : null;
     }
 
     public int getReadBufferSize() {
@@ -154,14 +155,6 @@ final class IoServerConfig<T> {
 
     public void setReadBufferSize(int readBufferSize) {
         this.readBufferSize = readBufferSize;
-    }
-
-    int getFlowLimitLine() {
-        return flowLimitLine;
-    }
-
-    int getReleaseLine() {
-        return releaseLine;
     }
 
     public boolean isBannerEnabled() {
@@ -183,14 +176,17 @@ final class IoServerConfig<T> {
         socketOptions.put(socketOption, f);
     }
 
-    public boolean isServer() {
-        return server;
+    public int getWriteQueueCapacity() {
+        return writeQueueCapacity;
+    }
+
+    public void setWriteQueueCapacity(int writeQueueCapacity) {
+        this.writeQueueCapacity = writeQueueCapacity;
     }
 
     @Override
     public String toString() {
         return "IoServerConfig{" +
-                "writeQueueSize=" + writeQueueSize +
                 ", readBufferSize=" + readBufferSize +
                 ", host='" + host + '\'' +
                 ", monitor=" + monitor +
@@ -198,12 +194,23 @@ final class IoServerConfig<T> {
                 ", processor=" + processor +
                 ", protocol=" + protocol +
                 ", threadNum=" + threadNum +
-                ", limitRate=" + limitRate +
-                ", releaseRate=" + releaseRate +
-                ", flowLimitLine=" + flowLimitLine +
-                ", releaseLine=" + releaseLine +
                 ", bannerEnabled=" + bannerEnabled +
                 ", socketOptions=" + socketOptions +
                 '}';
+    }
+
+    /**
+     * smart-socket服务配置
+     */
+    interface Property {
+        String PROJECT_NAME = "smart-socket";
+        String SESSION_WRITE_CHUNK_SIZE = PROJECT_NAME + ".session.writeChunkSize";
+        String BUFFER_PAGE_NUM = PROJECT_NAME + ".bufferPool.pageNum";
+        String SERVER_PAGE_SIZE = PROJECT_NAME + ".server.pageSize";
+        String CLIENT_PAGE_SIZE = PROJECT_NAME + ".client.pageSize";
+        String SERVER_PAGE_IS_DIRECT = PROJECT_NAME + ".server.page.isDirect";
+        String CLIENT_PAGE_IS_DIRECT = PROJECT_NAME + ".client.page.isDirect";
+//        String SERVER_FLOW_CONTROL_SIZE = PROJECT_NAME + ".server.flowControlSize";
+//        String SERVER_RELEASE_FLOW_CONTROL_SIZE = PROJECT_NAME + ".server.releaseFlowControlSize";
     }
 }

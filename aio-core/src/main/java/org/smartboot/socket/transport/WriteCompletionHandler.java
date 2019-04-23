@@ -36,6 +36,7 @@ class WriteCompletionHandler<T> implements CompletionHandler<Integer, AioSession
         } catch (Exception e) {
             failed(e, aioSession);
         }
+
     }
 
     @Override

@@ -13,18 +13,17 @@ import java.nio.ByteBuffer;
  * @version V1.0 , 2018/4/24
  */
 public class FixedLengthProtocol implements Protocol<String> {
-    private static final int INT_BYTES = 4;//int类型的字节长度
 
     @Override
     public String decode(ByteBuffer readBuffer, AioSession<String> session) {
-        if (session.getAttachment() == null && readBuffer.remaining() < INT_BYTES) {//首次解码不足四字节，无法知晓消息长度
+        if (!readBuffer.hasRemaining()) {
             return null;
         }
         FixedLengthFrameDecoder fixedLengthFrameDecoder;
         if (session.getAttachment() != null) {
             fixedLengthFrameDecoder = session.getAttachment();
         } else {
-            int length = readBuffer.getInt();//获得消息体长度
+            byte length = readBuffer.get();//获得消息体长度
             fixedLengthFrameDecoder = new FixedLengthFrameDecoder(length);//构建指定长度的临时缓冲区
             session.setAttachment(fixedLengthFrameDecoder);//缓存临时缓冲区
         }
@@ -38,15 +37,5 @@ public class FixedLengthProtocol implements Protocol<String> {
         fullBuffer.get(bytes);
         session.setAttachment(null);//释放临时缓冲区
         return new String(bytes);
-    }
-
-    @Override
-    public ByteBuffer encode(String msg, AioSession<String> session) {
-        byte[] bytes = msg.getBytes();
-        ByteBuffer buffer = ByteBuffer.allocate(INT_BYTES + bytes.length);
-        buffer.putInt(bytes.length);//消息头
-        buffer.put(bytes);//消息体
-        buffer.flip();
-        return buffer;
     }
 }
