@@ -15,6 +15,7 @@ import org.smartboot.socket.StateMachineEnum;
 
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 
 /**
  * 读写事件回调处理类
@@ -25,29 +26,44 @@ import java.util.concurrent.ExecutorService;
 class ReadCompletionHandler<T> implements CompletionHandler<Integer, AioSession<T>> {
     private static final Logger LOGGER = LoggerFactory.getLogger(ReadCompletionHandler.class);
     private ExecutorService executorService;
-    private ThreadLocal<Object> threadLocal = new ThreadLocal<>();
+
+//    private ThreadLocal<Object> threadLocal = new ThreadLocal<>();
+
+    private Semaphore semaphore;
 
     public ReadCompletionHandler() {
     }
 
-    public ReadCompletionHandler(ExecutorService executorService) {
+    public ReadCompletionHandler(ExecutorService executorService, Semaphore semaphore) {
         this.executorService = executorService;
+        this.semaphore = semaphore;
     }
 
     @Override
     public void completed(final Integer result, final AioSession<T> aioSession) {
-        if (executorService != null && threadLocal.get() == null) {
+        if (executorService == null || aioSession.threadLocal) {
+            completed0(result, aioSession);
+            return;
+        }
+
+        if (semaphore == null || !semaphore.tryAcquire()) {
             executorService.execute(new Runnable() {
                 @Override
                 public void run() {
-                    threadLocal.set(this);
                     completed0(result, aioSession);
-                    threadLocal.remove();
                 }
             });
-        } else {
-            completed0(result, aioSession);
+            return;
         }
+//        threadLocal.set(this);
+        aioSession.threadLocal = true;
+        try {
+            completed0(result, aioSession);
+        } finally {
+            aioSession.threadLocal = false;
+            semaphore.release();
+        }
+
     }
 
     private void completed0(final Integer result, final AioSession<T> aioSession) {
@@ -72,7 +88,7 @@ class ReadCompletionHandler<T> implements CompletionHandler<Integer, AioSession<
             LOGGER.debug(e.getMessage(), e);
         }
         try {
-            aioSession.close();
+            aioSession.close(false);
         } catch (Exception e) {
             LOGGER.debug(e.getMessage(), e);
         }

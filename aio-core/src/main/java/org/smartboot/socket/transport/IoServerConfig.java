@@ -32,7 +32,7 @@ final class IoServerConfig<T> {
             "\\__, \\| ( ) ( ) |( (_| || |   | |_    \\__, \\( (_) )( (___ | |\\`\\ (  ___/| |_ \n" +
             "(____/(_) (_) (_)`\\__,_)(_)   `\\__)   (____/`\\___/'`\\____)(_) (_)`\\____)`\\__)";
 
-    public static final String VERSION = "v1.4.0";
+    public static final String VERSION = "v1.4.1";
     /**
      * 释放流控阈值
      */
@@ -71,10 +71,6 @@ final class IoServerConfig<T> {
      * 协议编解码
      */
     private Protocol<T> protocol;
-    /**
-     * 服务器处理线程数
-     */
-    private int threadNum = Runtime.getRuntime().availableProcessors() + 1;
     /**
      * 是否启用控制台banner
      */
@@ -118,14 +114,6 @@ final class IoServerConfig<T> {
 
     public final void setPort(int port) {
         this.port = port;
-    }
-
-    public final int getThreadNum() {
-        return threadNum;
-    }
-
-    public final void setThreadNum(int threadNum) {
-        this.threadNum = threadNum;
     }
 
     public NetMonitor<T> getMonitor() {
@@ -193,7 +181,6 @@ final class IoServerConfig<T> {
                 ", port=" + port +
                 ", processor=" + processor +
                 ", protocol=" + protocol +
-                ", threadNum=" + threadNum +
                 ", bannerEnabled=" + bannerEnabled +
                 ", socketOptions=" + socketOptions +
                 '}';
