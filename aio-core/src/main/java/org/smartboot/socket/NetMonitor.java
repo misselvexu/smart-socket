@@ -27,8 +27,9 @@ import java.nio.channels.AsynchronousSocketChannel;
  *
  * <b>注意:</b>
  * <p>
- * 实现本接口时要关注acceptMonitor接口的返回值,如无特殊需求直接返回true，若返回false会拒绝本次连接
+ * 实现本接口时要关注acceptMonitor接口的返回值,如无特殊需求直接返回true，若返回false会拒绝本次连接。
  * </p>
+ * <b>非必要情况下请勿使用该接口，未来可能会调整接口设计</b>
  *
  * @author 三刀
  * @version V1.0.0
@@ -41,10 +42,10 @@ public interface NetMonitor<T> {
      * 监控已接收到的连接
      * </p>
      *
-     * @param channel
+     * @param channel 当前已经建立连接的通道对象
      * @return true:接受该连接,false:拒绝该连接
      */
-    boolean acceptMonitor(AsynchronousSocketChannel channel);
+    boolean shouldAccept(AsynchronousSocketChannel channel);
 
     /**
      * 监控触发本次读回调Session的已读数据字节数
@@ -52,7 +53,14 @@ public interface NetMonitor<T> {
      * @param session  当前执行read的AioSession对象
      * @param readSize 已读数据长度
      */
-    void readMonitor(AioSession<T> session, int readSize);
+    void afterRead(AioSession<T> session, int readSize);
+
+    /**
+     * 即将开始读取数据
+     *
+     * @param session
+     */
+    void beforeRead(AioSession<T> session);
 
     /**
      * 监控触发本次写回调session的已写数据字节数
@@ -60,6 +68,13 @@ public interface NetMonitor<T> {
      * @param session   本次执行write回调的AIOSession对象
      * @param writeSize 本次输出的数据长度
      */
-    void writeMonitor(AioSession<T> session, int writeSize);
+    void afterWrite(AioSession<T> session, int writeSize);
+
+    /**
+     * 即将开始写数据
+     *
+     * @param session
+     */
+    void beforeWrite(AioSession<T> session);
 
 }

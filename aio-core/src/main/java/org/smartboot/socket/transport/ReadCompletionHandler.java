@@ -14,8 +14,11 @@ import org.smartboot.socket.NetMonitor;
 import org.smartboot.socket.StateMachineEnum;
 
 import java.nio.channels.CompletionHandler;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 读写事件回调处理类
@@ -23,55 +26,138 @@ import java.util.concurrent.Semaphore;
  * @author 三刀
  * @version V1.0.0
  */
-class ReadCompletionHandler<T> implements CompletionHandler<Integer, AioSession<T>> {
+class ReadCompletionHandler<T> implements CompletionHandler<Integer, TcpAioSession<T>> {
+    /**
+     * logger
+     */
     private static final Logger LOGGER = LoggerFactory.getLogger(ReadCompletionHandler.class);
-    private ExecutorService executorService;
+    /**
+     * 读回调资源信号量
+     */
+    private AtomicInteger semaphore;
 
-//    private ThreadLocal<Object> threadLocal = new ThreadLocal<>();
+    /**
+     * 读会话缓存队列
+     */
+    private ConcurrentLinkedQueue<TcpAioSession<T>> cacheAioSessionQueue;
 
-    private Semaphore semaphore;
+    /**
+     * 应该可以不用volatile
+     */
+    private boolean needNotify = true;
+    /**
+     * 同步锁
+     */
+    private ReentrantLock lock = new ReentrantLock();
+    /**
+     * 非空条件
+     */
+    private final Condition notEmpty = lock.newCondition();
 
-    public ReadCompletionHandler() {
+    ReadCompletionHandler() {
     }
 
-    public ReadCompletionHandler(ExecutorService executorService, Semaphore semaphore) {
-        this.executorService = executorService;
+    ReadCompletionHandler(AtomicInteger semaphore) {
         this.semaphore = semaphore;
+        this.cacheAioSessionQueue = new ConcurrentLinkedQueue<>();
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        TcpAioSession aioSession = cacheAioSessionQueue.poll();
+                        if (aioSession != null) {
+                            completed0(aioSession.getLastReadSize(), aioSession);
+                            synchronized (this) {
+                                this.wait(100);
+                            }
+                            continue;
+                        }
+                        if (!lock.tryLock()) {
+                            synchronized (this) {
+                                this.wait(100);
+                            }
+                            continue;
+                        }
+                        try {
+                            needNotify = true;
+                            notEmpty.await();
+                        } finally {
+                            lock.unlock();
+                        }
+
+                    } catch (InterruptedException e) {
+                        LOGGER.error("", e);
+                    }
+                }
+            }
+        }, "smart-socket:watchman");
+        t.setDaemon(true);
+        t.setPriority(1);
+        t.start();
     }
+
 
     @Override
-    public void completed(final Integer result, final AioSession<T> aioSession) {
-        if (executorService == null || aioSession.threadLocal) {
+    public void completed(final Integer result, final TcpAioSession<T> aioSession) {
+        aioSession.setLastReadSize(result);
+        if (semaphore != null && aioSession.getThreadReference() == null) {
+            aioSession.setThreadReference(new AtomicReference<Thread>());
+        }
+        if (semaphore == null || aioSession.getThreadReference().get() == Thread.currentThread()) {
+            runRingBufferTask();
             completed0(result, aioSession);
             return;
         }
-
-        if (semaphore == null || !semaphore.tryAcquire()) {
-            executorService.execute(new Runnable() {
-                @Override
-                public void run() {
-                    completed0(result, aioSession);
-                }
-            });
-            return;
-        }
-//        threadLocal.set(this);
-        aioSession.threadLocal = true;
         try {
-            completed0(result, aioSession);
+            if (semaphore.getAndDecrement() > 0) {
+                Thread thread = Thread.currentThread();
+                aioSession.getThreadReference().set(thread);
+                completed0(result, aioSession);
+                runRingBufferTask();
+                aioSession.getThreadReference().compareAndSet(thread, null);
+                return;
+            }
         } finally {
-            aioSession.threadLocal = false;
-            semaphore.release();
+            semaphore.incrementAndGet();
         }
 
+        cacheAioSessionQueue.offer(aioSession);
+        if (needNotify && lock.tryLock()) {
+            try {
+                needNotify = false;
+                notEmpty.signal();
+            } finally {
+                lock.unlock();
+            }
+        }
     }
 
-    private void completed0(final Integer result, final AioSession<T> aioSession) {
+    /**
+     * 执行异步队列中的任务
+     */
+    private void runRingBufferTask() {
+        if (cacheAioSessionQueue == null) {
+            return;
+        }
+        TcpAioSession<T> aioSession = cacheAioSessionQueue.poll();
+        if (aioSession == null) {
+            return;
+        }
+        Thread thread = Thread.currentThread();
+        do {
+            aioSession.getThreadReference().set(thread);
+            completed0(aioSession.getLastReadSize(), aioSession);
+            aioSession.getThreadReference().compareAndSet(thread, null);
+        } while ((aioSession = cacheAioSessionQueue.poll()) != null);
+    }
+
+    private void completed0(final Integer result, final TcpAioSession<T> aioSession) {
         try {
             // 接收到的消息进行预处理
             NetMonitor<T> monitor = aioSession.getServerConfig().getMonitor();
             if (monitor != null) {
-                monitor.readMonitor(aioSession, result);
+                monitor.afterRead(aioSession, result);
             }
             aioSession.readFromChannel(result == -1);
         } catch (Exception e) {
@@ -80,8 +166,7 @@ class ReadCompletionHandler<T> implements CompletionHandler<Integer, AioSession<
     }
 
     @Override
-    public void failed(Throwable exc, AioSession<T> aioSession) {
-
+    public void failed(Throwable exc, TcpAioSession<T> aioSession) {
         try {
             aioSession.getServerConfig().getProcessor().stateEvent(aioSession, StateMachineEnum.INPUT_EXCEPTION, exc);
         } catch (Exception e) {

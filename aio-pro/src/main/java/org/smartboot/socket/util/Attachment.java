@@ -1,26 +1,55 @@
 package org.smartboot.socket.util;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * @author 三刀
  * @version V1.0 , 2018/6/1
  */
 public class Attachment {
-    private Map<String, AttachKey> attachKeyMap = new ConcurrentHashMap<>();
 
-    public <T> void put(AttachKey<T> key, T t) {
-        key.setValue(t);
-        attachKeyMap.put(key.getKey(), key);
+    /**
+     * 附件值
+     */
+    private Object[] values = new Object[8];
+
+    /**
+     * 存储附件
+     *
+     * @param key   附件Key
+     * @param value 附件值
+     * @param <T>   附件值
+     */
+    public <T> void put(AttachKey<T> key, T value) {
+        int index = key.getIndex();
+        if (index > values.length) {
+            Object[] old = values;
+            int i = 1;
+            do {
+                i <<= 1;
+            } while (i < index);
+            values = new Object[i];
+            System.arraycopy(old, 0, values, 0, old.length);
+        }
+        values[index] = value;
     }
 
-
+    /**
+     * 获取附件对象
+     *
+     * @param key 附件Key
+     * @param <T> 附件值
+     * @return 附件值
+     */
     public <T> T get(AttachKey<T> key) {
-        return (T) attachKeyMap.get(key.getKey()).getValue();
+        return (T) values[key.getIndex()];
     }
 
+    /**
+     * 移除附件
+     *
+     * @param key 附件Key
+     * @param <T> 附件值
+     */
     public <T> void remove(AttachKey<T> key) {
-        attachKeyMap.remove(key.getKey());
+        values[key.getIndex()] = null;
     }
 }

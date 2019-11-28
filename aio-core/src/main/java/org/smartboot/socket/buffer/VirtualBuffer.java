@@ -20,6 +20,9 @@ public final class VirtualBuffer {
      * @see ByteBuffer#slice()
      */
     private ByteBuffer buffer;
+    /**
+     * 是否已回收
+     */
     private boolean clean = false;
     /**
      * 当前虚拟buffer映射的实际buffer.position
@@ -54,21 +57,32 @@ public final class VirtualBuffer {
         this.parentLimit = parentLimit;
     }
 
+    /**
+     * 获取真实缓冲区
+     *
+     * @return 真实缓冲区
+     */
     public ByteBuffer buffer() {
         return buffer;
     }
 
+    /**
+     * 设置真实缓冲区
+     *
+     * @param buffer 真实缓冲区
+     */
     void buffer(ByteBuffer buffer) {
         this.buffer = buffer;
         clean = false;
     }
 
+    /**
+     * 释放虚拟缓冲区
+     */
     public void clean() {
         if (clean) {
-            System.err.println("buffer has cleaned");
-            throw new RuntimeException();
+            throw new UnsupportedOperationException("buffer has cleaned");
         }
-//        buffer = null;
         clean = true;
         if (bufferPage != null) {
             bufferPage.clean(this);
@@ -77,9 +91,6 @@ public final class VirtualBuffer {
 
     @Override
     public String toString() {
-        return "VirtualBuffer{" +
-                "parentPosition=" + parentPosition +
-                ", parentLimit=" + parentLimit +
-                '}';
+        return "VirtualBuffer{parentPosition=" + parentPosition + ", parentLimit=" + parentLimit + '}';
     }
 }

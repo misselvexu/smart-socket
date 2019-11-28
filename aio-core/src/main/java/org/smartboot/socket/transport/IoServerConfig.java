@@ -24,6 +24,9 @@ import java.util.Map;
  */
 final class IoServerConfig<T> {
 
+    /**
+     * banner信息
+     */
     public static final String BANNER = "\n" +
             "                               _                           _             _   \n" +
             "                              ( )_                        ( )           ( )_ \n" +
@@ -32,16 +35,8 @@ final class IoServerConfig<T> {
             "\\__, \\| ( ) ( ) |( (_| || |   | |_    \\__, \\( (_) )( (___ | |\\`\\ (  ___/| |_ \n" +
             "(____/(_) (_) (_)`\\__,_)(_)   `\\__)   (____/`\\___/'`\\____)(_) (_)`\\____)`\\__)";
 
-    public static final String VERSION = "v1.4.2";
-    /**
-     * 释放流控阈值
-     */
-//    private final int releaseFlowControlSize = getIntProperty(Property.SERVER_RELEASE_FLOW_CONTROL_SIZE, 10);
+    public static final String VERSION = "v1.4.5";
 
-    /**
-     * 流控阈值
-     */
-//    private final int flowControlSize = getIntProperty(Property.SERVER_FLOW_CONTROL_SIZE, 20);
     /**
      * 消息体缓存大小,字节
      */
@@ -81,6 +76,11 @@ final class IoServerConfig<T> {
      */
     private Map<SocketOption<Object>, Object> socketOptions;
 
+    /**
+     * 线程数
+     */
+    private int threadNum = 1;
+
     static int getIntProperty(String property, int defaultVal) {
         String valString = System.getProperty(property);
         if (valString != null) {
@@ -100,19 +100,19 @@ final class IoServerConfig<T> {
         return defaultVal;
     }
 
-    public final String getHost() {
+    public String getHost() {
         return host;
     }
 
-    public final void setHost(String host) {
+    public void setHost(String host) {
         this.host = host;
     }
 
-    public final int getPort() {
+    public int getPort() {
         return port;
     }
 
-    public final void setPort(int port) {
+    public void setPort(int port) {
         this.port = port;
     }
 
@@ -128,11 +128,11 @@ final class IoServerConfig<T> {
         this.protocol = protocol;
     }
 
-    public final MessageProcessor<T> getProcessor() {
+    public MessageProcessor<T> getProcessor() {
         return processor;
     }
 
-    public final void setProcessor(MessageProcessor<T> processor) {
+    public void setProcessor(MessageProcessor<T> processor) {
         this.processor = processor;
         this.monitor = (processor instanceof NetMonitor) ? (NetMonitor<T>) processor : null;
     }
@@ -159,7 +159,7 @@ final class IoServerConfig<T> {
 
     public void setOption(SocketOption socketOption, Object f) {
         if (socketOptions == null) {
-            socketOptions = new HashMap<>();
+            socketOptions = new HashMap<>(4);
         }
         socketOptions.put(socketOption, f);
     }
@@ -171,6 +171,15 @@ final class IoServerConfig<T> {
     public void setWriteQueueCapacity(int writeQueueCapacity) {
         this.writeQueueCapacity = writeQueueCapacity;
     }
+
+    public int getThreadNum() {
+        return threadNum;
+    }
+
+    public void setThreadNum(int threadNum) {
+        this.threadNum = threadNum;
+    }
+
 
     @Override
     public String toString() {
@@ -197,7 +206,5 @@ final class IoServerConfig<T> {
         String CLIENT_PAGE_SIZE = PROJECT_NAME + ".client.pageSize";
         String SERVER_PAGE_IS_DIRECT = PROJECT_NAME + ".server.page.isDirect";
         String CLIENT_PAGE_IS_DIRECT = PROJECT_NAME + ".client.page.isDirect";
-//        String SERVER_FLOW_CONTROL_SIZE = PROJECT_NAME + ".server.flowControlSize";
-//        String SERVER_RELEASE_FLOW_CONTROL_SIZE = PROJECT_NAME + ".server.releaseFlowControlSize";
     }
 }

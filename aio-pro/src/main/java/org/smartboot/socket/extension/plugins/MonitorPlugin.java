@@ -7,7 +7,6 @@ import org.smartboot.socket.transport.AioSession;
 import org.smartboot.socket.util.QuickTimerTask;
 
 import java.nio.channels.AsynchronousSocketChannel;
-import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -18,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author 三刀
  * @version V1.0 , 2018/8/19
  */
-public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
+public final class MonitorPlugin<T> implements Runnable, Plugin<T> {
     private static final Logger logger = LoggerFactory.getLogger(MonitorPlugin.class);
     /**
      * 任务执行频率
@@ -64,6 +63,10 @@ public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
 
     private AtomicInteger totalConnect = new AtomicInteger(0);
 
+    private AtomicInteger readCount = new AtomicInteger(0);
+
+    private AtomicInteger writeCount = new AtomicInteger(0);
+
     public MonitorPlugin() {
         this(60);
     }
@@ -71,7 +74,7 @@ public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
     public MonitorPlugin(int seconds) {
         this.seconds = seconds;
         long mills = TimeUnit.SECONDS.toMillis(seconds);
-        QuickTimerTask.getTimer().schedule(this, mills, mills);
+        QuickTimerTask.scheduleAtFixedRate(this, mills, mills);
     }
 
 
@@ -94,6 +97,9 @@ public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
             case SESSION_CLOSED:
                 disConnect.incrementAndGet();
                 break;
+            default:
+                //ignore other state
+                break;
         }
     }
 
@@ -102,29 +108,30 @@ public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
         long curInFlow = inFlow.getAndSet(0);
         long curOutFlow = outFlow.getAndSet(0);
         long curDiscardNum = processFailNum.getAndSet(0);
-        long curProcessMsgNum = processMsgNum.getAndSet(0);
-        int connectCount = newConnect.getAndSet(0);
-        int disConnectCount = disConnect.getAndSet(0);
-        logger.info("\r\n-----这" + seconds + "秒发生了什么----\r\n流入流量:\t\t" + curInFlow * 1.0 / (1024 * 1024) + "(MB)"
-                + "\r\n流出流量:\t" + curOutFlow * 1.0 / (1024 * 1024) + "(MB)"
-                + "\r\n处理失败消息数:\t" + curDiscardNum
-                + "\r\n已处理消息量:\t" + curProcessMsgNum
-                + "\r\n已处理消息总量:\t" + totleProcessMsgNum.get()
-                + "\r\n新建连接数:\t" + connectCount
-                + "\r\n断开连接数:\t" + disConnectCount
-                + "\r\n在线连接数:\t" + onlineCount.addAndGet(connectCount - disConnectCount)
-                + "\r\n总连接次数:\t" + totalConnect.addAndGet(connectCount)
+        long curProcessMsgNum = processMsgNum.getAndAdd(-processMsgNum.get());
+        int connectCount = newConnect.getAndAdd(-newConnect.get());
+        int disConnectCount = disConnect.getAndAdd(-disConnect.get());
+        logger.info("\r\n-----这" + seconds + "秒发生了什么----\r\ninflow:\t\t" + curInFlow * 1.0 / (1024 * 1024) + "(MB)"
+                + "\r\noutflow:\t" + curOutFlow * 1.0 / (1024 * 1024) + "(MB)"
+                + "\r\nprocess fail:\t" + curDiscardNum
+                + "\r\nprocess success:\t" + curProcessMsgNum
+                + "\r\nprocess total:\t" + totleProcessMsgNum.get()
+                + "\r\nread count:\t" + readCount.getAndSet(0) + "\twrite count:\t" + writeCount.getAndSet(0)
+                + "\r\nconnect count:\t" + connectCount
+                + "\r\ndisconnect count:\t" + disConnectCount
+                + "\r\nonline count:\t" + onlineCount.addAndGet(connectCount - disConnectCount)
+                + "\r\nconnected total:\t" + totalConnect.addAndGet(connectCount)
                 + "\r\nRequests/sec:\t" + curProcessMsgNum * 1.0 / seconds
                 + "\r\nTransfer/sec:\t" + (curInFlow * 1.0 / (1024 * 1024) / seconds) + "(MB)");
     }
 
     @Override
-    public boolean acceptMonitor(AsynchronousSocketChannel channel) {
+    public boolean shouldAccept(AsynchronousSocketChannel channel) {
         return true;
     }
 
     @Override
-    public void readMonitor(AioSession<T> session, int readSize) {
+    public void afterRead(AioSession<T> session, int readSize) {
         //出现result为0,说明代码存在问题
         if (readSize == 0) {
             logger.error("readSize is 0");
@@ -133,7 +140,17 @@ public final class MonitorPlugin<T> extends TimerTask implements Plugin<T> {
     }
 
     @Override
-    public void writeMonitor(AioSession<T> session, int writeSize) {
+    public void beforeRead(AioSession<T> session) {
+        readCount.incrementAndGet();
+    }
+
+    @Override
+    public void afterWrite(AioSession<T> session, int writeSize) {
         outFlow.addAndGet(writeSize);
+    }
+
+    @Override
+    public void beforeWrite(AioSession<T> session) {
+        writeCount.incrementAndGet();
     }
 }

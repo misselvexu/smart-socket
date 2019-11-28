@@ -19,24 +19,38 @@ public abstract class AbstractMessageProcessor<T> implements MessageProcessor<T>
     private List<Plugin<T>> plugins = new ArrayList<>();
 
     @Override
-    public final void readMonitor(AioSession<T> session, int readSize) {
+    public final void afterRead(AioSession<T> session, int readSize) {
         for (Plugin<T> plugin : plugins) {
-            plugin.readMonitor(session, readSize);
+            plugin.afterRead(session, readSize);
         }
     }
 
     @Override
-    public final void writeMonitor(AioSession<T> session, int writeSize) {
+    public final void afterWrite(AioSession<T> session, int writeSize) {
         for (Plugin<T> plugin : plugins) {
-            plugin.writeMonitor(session, writeSize);
+            plugin.afterWrite(session, writeSize);
         }
     }
 
     @Override
-    public final boolean acceptMonitor(AsynchronousSocketChannel channel) {
+    public final void beforeRead(AioSession<T> session) {
+        for (Plugin<T> plugin : plugins) {
+            plugin.beforeRead(session);
+        }
+    }
+
+    @Override
+    public final void beforeWrite(AioSession<T> session) {
+        for (Plugin<T> plugin : plugins) {
+            plugin.beforeWrite(session);
+        }
+    }
+
+    @Override
+    public final boolean shouldAccept(AsynchronousSocketChannel channel) {
         boolean accept;
         for (Plugin<T> plugin : plugins) {
-            accept = plugin.acceptMonitor(channel);
+            accept = plugin.shouldAccept(channel);
             if (!accept) {
                 return accept;
             }
@@ -57,8 +71,20 @@ public abstract class AbstractMessageProcessor<T> implements MessageProcessor<T>
         }
     }
 
+    /**
+     * 处理接收到的消息
+     *
+     * @param session
+     * @param msg
+     * @see MessageProcessor#process(AioSession, Object)
+     */
     public abstract void process0(AioSession<T> session, T msg);
 
+    /**
+     * @param session          本次触发状态机的AioSession对象
+     * @param stateMachineEnum 状态枚举
+     * @param throwable        异常对象，如果存在的话
+     */
     @Override
     public final void stateEvent(AioSession<T> session, StateMachineEnum stateMachineEnum, Throwable throwable) {
         for (Plugin<T> plugin : plugins) {
@@ -67,6 +93,12 @@ public abstract class AbstractMessageProcessor<T> implements MessageProcessor<T>
         stateEvent0(session, stateMachineEnum, throwable);
     }
 
+    /**
+     * @param session
+     * @param stateMachineEnum
+     * @param throwable
+     * @see #stateEvent(AioSession, StateMachineEnum, Throwable)
+     */
     public abstract void stateEvent0(AioSession<T> session, StateMachineEnum stateMachineEnum, Throwable throwable);
 
     public final void addPlugin(Plugin plugin) {

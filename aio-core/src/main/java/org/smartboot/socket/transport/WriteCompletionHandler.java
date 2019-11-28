@@ -21,26 +21,25 @@ import java.nio.channels.CompletionHandler;
  * @author 三刀
  * @version V1.0.0
  */
-class WriteCompletionHandler<T> implements CompletionHandler<Integer, AioSession<T>> {
+class WriteCompletionHandler<T> implements CompletionHandler<Integer, TcpAioSession<T>> {
     private static final Logger LOGGER = LoggerFactory.getLogger(WriteCompletionHandler.class);
 
     @Override
-    public void completed(final Integer result, final AioSession<T> aioSession) {
+    public void completed(final Integer result, final TcpAioSession<T> aioSession) {
         try {
-            // 接收到的消息进行预处理
             NetMonitor<T> monitor = aioSession.getServerConfig().getMonitor();
             if (monitor != null) {
-                monitor.writeMonitor(aioSession, result);
+                monitor.afterWrite(aioSession, result);
             }
             aioSession.writeToChannel();
         } catch (Exception e) {
             failed(e, aioSession);
         }
-
     }
 
+
     @Override
-    public void failed(Throwable exc, AioSession<T> aioSession) {
+    public void failed(Throwable exc, TcpAioSession<T> aioSession) {
         try {
             aioSession.getServerConfig().getProcessor().stateEvent(aioSession, StateMachineEnum.OUTPUT_EXCEPTION, exc);
         } catch (Exception e) {
